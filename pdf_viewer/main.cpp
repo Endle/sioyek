@@ -222,16 +222,16 @@ void configure_paths(){
 }
 
 void verify_paths(){
-#define CHECK_DIR_EXIST(path) do{ if(! path.dir_exists() ) std::wcout << L"Error: " << #path << ": " << shader_path << L" doesn't exist!\n"; } while(false)
+#define CHECK_DIR_EXIST(path) do{ if(!(path).dir_exists() ) std::wcout << L"Error: " << #path << ": " << path << L" doesn't exist!\n"; } while(false)
 
     std::wcout << L"default_config_path: " << default_config_path << L"\n";
     CHECK_DIR_EXIST(default_config_path);
     std::wcout << L"default_keys_path: " << default_keys_path << L"\n";
     CHECK_DIR_EXIST(default_keys_path);
-    for (int i = 0; i < user_config_paths.size(); i++) {
+    for (size_t i = 0; i < user_config_paths.size(); i++) {
         std::wcout << L"user_config_path: [ " << i << " ] " << user_config_paths[i] << L"\n";
     }
-    for (int i = 0; i < user_keys_paths.size(); i++) {
+    for (size_t i = 0; i < user_keys_paths.size(); i++) {
         std::wcout << L"user_keys_path: [ " << i << " ] " << user_keys_paths[i] << L"\n";
     }
     std::wcout << L"database_file_path: " << database_file_path << L"\n";
