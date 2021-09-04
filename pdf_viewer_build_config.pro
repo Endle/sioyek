@@ -68,7 +68,7 @@ win32{
 unix:!mac {
 
     QMAKE_CXXFLAGS += -std=c++17
-    LIBS += -ldl -Lmupdf/build/release -lmupdf -lmupdf-third -lmupdf-threads -lharfbuzz -lz
+    LIBS += -ldl -Lmupdf/build/release -lmupdf -lmupdf-third -lharfbuzz -lfreetype -lgumbo -ljbig2dec -lopenjp2 -ljpeg -lz
     isEmpty(PREFIX){
         PREFIX = /usr
     }
