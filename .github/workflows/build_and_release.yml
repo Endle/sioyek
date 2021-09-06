@@ -19,6 +19,9 @@ jobs:
     - name: Check context
       run: |
         echo ${{ github.ref }}
+        echo ${{ github.event_name }}
+        echo ${{ github.head_ref }}
+        echo ${{ github.base_ref }}
         echo "ok"
     - uses: actions/checkout@v1
     - name: create release
