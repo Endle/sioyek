@@ -139,7 +139,7 @@ jobs:
         name: uploads
         path: sioyek-release-linux.zip
     - name: Workaround apt-get cache permission (https://github.com/actions/cache/issues/324)
-      run: chmod -R a+rwx /var/cache/apt/archives
+      run: sudo chmod -R a+rwx /var/cache/apt/archives
 
   build-linux-portable:
     runs-on: ubuntu-18.04
@@ -188,7 +188,7 @@ jobs:
         name: uploads
         path: sioyek-release-linux-portable.zip
     - name: Workaround apt-get cache permission (https://github.com/actions/cache/issues/324)
-      run: chmod -R a+rwx /var/cache/apt/archives
+      run: sudo chmod -R a+rwx /var/cache/apt/archives
 
   build-windows:
 
