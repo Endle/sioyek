@@ -69,6 +69,7 @@ unix:!mac {
 
     QMAKE_CXXFLAGS += -std=c++17
     LIBS += -ldl -Lmupdf/build/release -lmupdf -lmupdf-third -lharfbuzz -lfreetype -lgumbo -ljbig2dec -lopenjp2 -ljpeg -lz
+    DEFINES += LINUX_STANDARD_PATHS
     isEmpty(PREFIX){
         PREFIX = /usr
     }

@@ -79,7 +79,7 @@
 #undef FTS_FUZZY_MATCH_IMPLEMENTATION
 
 
-#define LINUX_STANDARD_PATHS
+//#define LINUX_STANDARD_PATHS
 
 
 extern std::wstring APPLICATION_NAME = L"sioyek";
