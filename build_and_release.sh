@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-if [ -z ${MAKE_PARALLEL+x} ]; then export MAKE_PARALLEL=1; else echo "MAKE_PARALLEL set to $MAKE_PARALLEL"; fi
-
+if [ -z ${MAKE_PARALLEL+x} ]; then export MAKE_PARALLEL=1; else echo "MAKE_PARALLEL defined"; fi
+echo "MAKE_PARALLEL set to $MAKE_PARALLEL"
 
 # download linuxdeployqt if not exists
 if [[ ! -f linuxdeployqt-continuous-x86_64.AppImage ]]; then

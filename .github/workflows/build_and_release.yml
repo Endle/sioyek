@@ -93,16 +93,27 @@ jobs:
     runs-on: ubuntu-18.04
 
     steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: 'recursive'
+    - name: Cache apt-get packages
+      uses: actions/cache@v2
+      env:
+        cache-name: cache-deb-packages
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-$(git rev-parse --short HEAD)
+        restore-keys: |
+          ${{ runner.os }}-build-${{ env.cache-name }}-
+          ${{ runner.os }}-build-
+          ${{ runner.os }}-
+
     - name: Set up GCC
       uses: egor-tensin/setup-gcc@v1
       with:
         version: 9
         platform: x64
-        
-    - uses: actions/checkout@v2
-      with:
-          submodules: 'recursive'
-            
+
     - name: Install libharfbuzz
       run: sudo apt install libharfbuzz-dev
       
@@ -128,17 +139,27 @@ jobs:
     runs-on: ubuntu-18.04
 
     steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: 'recursive'
+    - name: Cache apt-get packages
+      uses: actions/cache@v2
+      env:
+        cache-name: cache-deb-packages
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-$(git rev-parse --short HEAD)
+        restore-keys: |
+          ${{ runner.os }}-build-${{ env.cache-name }}-
+          ${{ runner.os }}-build-
+          ${{ runner.os }}-
 
     - name: Set up GCC
       uses: egor-tensin/setup-gcc@v1
       with:
         version: 9
         platform: x64
-        
-    - uses: actions/checkout@v2
-      with:
-            submodules: 'recursive'
-            
+
     - name: Install libharfbuzz
       run: sudo apt install libharfbuzz-dev
       
@@ -224,14 +245,20 @@ jobs:
       with:
             submodules: 'recursive'
 
-    - name: Configure Homebrew cache
-      uses: actions/cache@v2
+    - uses: actions/checkout@v2
       with:
-        path: |
-          ~/Library/Caches/Homebrew/foo--*
-          ~/Library/Caches/Homebrew/downloads/*--foo-*
-        key: brew-${{ hashFiles('.github/brew-formulae') }}
-        restore-keys: brew-
+        submodules: 'recursive'
+    - name: Cache Homebrew packages
+      uses: actions/cache@v2
+      env:
+        cache-name: homebrew
+      with:
+        path: ~/Library/Caches/Homebrew
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-$(git rev-parse --short HEAD)
+        restore-keys: |
+          ${{ runner.os }}-build-${{ env.cache-name }}-
+          ${{ runner.os }}-build-
+          ${{ runner.os }}-
 
     - name: Install dependencies
       run:  brew install freeglut mesa harfbuzz 
