@@ -102,7 +102,7 @@ jobs:
         cache-name: cache-deb-packages
       with:
         path: /var/cache/apt/archives
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-$(git rev-parse --short HEAD)
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ github.sha }}
         restore-keys: |
           ${{ runner.os }}-build-${{ env.cache-name }}-
           ${{ runner.os }}-build-
@@ -148,7 +148,7 @@ jobs:
         cache-name: cache-deb-packages
       with:
         path: /var/cache/apt/archives
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-$(git rev-parse --short HEAD)
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ github.sha }}
         restore-keys: |
           ${{ runner.os }}-build-${{ env.cache-name }}-
           ${{ runner.os }}-build-
@@ -251,7 +251,7 @@ jobs:
         cache-name: homebrew
       with:
         path: ~/Library/Caches/Homebrew
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-$(git rev-parse --short HEAD)
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ github.sha }}
         restore-keys: |
           ${{ runner.os }}-build-${{ env.cache-name }}-
           ${{ runner.os }}-build-
