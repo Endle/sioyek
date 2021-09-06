@@ -134,7 +134,7 @@ jobs:
     - name: Workaround apt-get cache permission (https://github.com/actions/cache/issues/324)
       run: |
         export USER_NAME=$(whoami)
-        sudo chown -R $USER_NAME .
+        sudo chown -R $USER_NAME /var/cache/apt/archives
 
   build-linux-portable:
     runs-on: ubuntu-18.04
@@ -146,7 +146,7 @@ jobs:
         cache-name: cache-deb-packages
       with:
         path: /var/cache/apt/archives
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ github.sha }}-${{ job.container.id }}
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ github.sha }}-portable
         restore-keys: |
           ${{ runner.os }}-build-${{ env.cache-name }}-
           ${{ runner.os }}-build-
@@ -185,7 +185,7 @@ jobs:
     - name: Workaround apt-get cache permission (https://github.com/actions/cache/issues/324)
       run: |
         export USER_NAME=$(whoami)
-        sudo chown -R $USER_NAME .
+        sudo chown -R $USER_NAME /var/cache/apt/archives
 
   build-windows:
 
