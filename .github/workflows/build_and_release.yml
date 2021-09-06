@@ -132,7 +132,9 @@ jobs:
         name: uploads
         path: sioyek-release-linux.zip
     - name: Workaround apt-get cache permission (https://github.com/actions/cache/issues/324)
-      run: sudo chown -R $(whoami) .
+      run: |
+        export USER_NAME=$(whoami)
+        sudo chown -R $USER_NAME .
 
   build-linux-portable:
     runs-on: ubuntu-18.04
@@ -144,7 +146,7 @@ jobs:
         cache-name: cache-deb-packages
       with:
         path: /var/cache/apt/archives
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ github.sha }}
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ github.sha }}-${{ job.container.id }}
         restore-keys: |
           ${{ runner.os }}-build-${{ env.cache-name }}-
           ${{ runner.os }}-build-
@@ -181,7 +183,9 @@ jobs:
         name: uploads
         path: sioyek-release-linux-portable.zip
     - name: Workaround apt-get cache permission (https://github.com/actions/cache/issues/324)
-      run: sudo chown -R $(whoami) .
+      run: |
+        export USER_NAME=$(whoami)
+        sudo chown -R $USER_NAME .
 
   build-windows:
 
