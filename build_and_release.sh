@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+
+if [ -z "MAKE_PARALLEL" ]; then export MAKE_PARALLEL=1; else echo "MAKE_PARALLEL set to $MAKE_PARALLEL"; fi
+
 # download linuxdeployqt if not exists
 if [[ ! -f linuxdeployqt-continuous-x86_64.AppImage ]]; then
 	wget https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
@@ -5,7 +9,7 @@ if [[ ! -f linuxdeployqt-continuous-x86_64.AppImage ]]; then
 fi
 
 cd mupdf
-make USE_SYSTEM_HARFBUZZ=yes
+make USE_SYSTEM_HARFBUZZ=yes -j$MAKE_PARALLEL
 cd ..
 
 if [[ $1 == portable ]]; then
@@ -15,7 +19,7 @@ else
 fi
 
 rm -r sioyek-release 2> /dev/null
-make install INSTALL_ROOT=sioyek-release
+make install INSTALL_ROOT=sioyek-release -j$MAKE_PARALLEL
 
 if [[ $1 == portable ]]; then
 	cp pdf_viewer/prefs.config sioyek-release/usr/bin/prefs.config
