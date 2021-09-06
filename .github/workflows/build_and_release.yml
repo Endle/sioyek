@@ -128,6 +128,7 @@ jobs:
     runs-on: ubuntu-18.04
 
     steps:
+
     - name: Set up GCC
       uses: egor-tensin/setup-gcc@v1
       with:
@@ -218,13 +219,20 @@ jobs:
   build-mac:
 
     runs-on: macos-latest
-
     steps:
-        
     - uses: actions/checkout@v2
       with:
             submodules: 'recursive'
-            
+
+    - name: Configure Homebrew cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/Library/Caches/Homebrew/foo--*
+          ~/Library/Caches/Homebrew/downloads/*--foo-*
+        key: brew-${{ hashFiles('.github/brew-formulae') }}
+        restore-keys: brew-
+
     - name: Install dependencies
       run:  brew install freeglut mesa harfbuzz 
       
