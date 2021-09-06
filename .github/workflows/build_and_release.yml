@@ -125,7 +125,7 @@ jobs:
     - name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
 
-      run: ./build_and_release.sh
+      run: MAKE_PARALLEL=$(nproc) ./build_and_release.sh
       env:
         CC:   gcc-9
         CXX:  g++-9
@@ -171,7 +171,7 @@ jobs:
     - name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
 
-      run: ./build_and_release.sh portable
+      run: MAKE_PARALLEL=$(nproc) ./build_and_release.sh portable
       env:
         CC:   gcc-9
         CXX:  g++-9
@@ -269,7 +269,7 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
         chmod +x build_mac.sh
-        ./build_mac.sh
+        MAKE_PARALLEL=$(nproc) ./build_mac.sh
         
     - name: upload mac artifact
       uses: actions/upload-artifact@v1
