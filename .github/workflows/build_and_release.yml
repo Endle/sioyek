@@ -11,18 +11,11 @@ on:
 
 jobs:
   upload-release:
-
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-18.04
     needs: [build-mac, build-linux, build-windows, build-linux-portable, build-windows-portable]
 
     steps:
-    - name: Check context
-      run: |
-        echo ${{ github.ref }}
-        echo ${{ github.event_name }}
-        echo ${{ github.head_ref }}
-        echo ${{ github.base_ref }}
-        echo "ok"
     - uses: actions/checkout@v1
     - name: create release
       id: create_release
