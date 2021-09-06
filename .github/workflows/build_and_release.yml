@@ -245,9 +245,6 @@ jobs:
       with:
             submodules: 'recursive'
 
-    - uses: actions/checkout@v2
-      with:
-        submodules: 'recursive'
     - name: Cache Homebrew packages
       uses: actions/cache@v2
       env:
