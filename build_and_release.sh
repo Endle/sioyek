@@ -10,7 +10,7 @@ if [[ ! -f linuxdeployqt-continuous-x86_64.AppImage ]]; then
 fi
 
 cd mupdf
-make USE_SYSTEM_HARFBUZZ=yes -j$MAKE_PARALLEL
+make USE_SYSTEM_HARFBUZZ=yes
 cd ..
 
 if [[ $1 == portable ]]; then
