@@ -96,9 +96,6 @@ jobs:
     runs-on: ubuntu-18.04
 
     steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: 'recursive'
     - name: Cache apt-get packages
       uses: actions/cache@v2
       env:
@@ -116,6 +113,10 @@ jobs:
       with:
         version: 9
         platform: x64
+
+    - uses: actions/checkout@v2
+      with:
+            submodules: 'recursive'
 
     - name: Install libharfbuzz
       run: sudo apt install libharfbuzz-dev
@@ -142,9 +143,6 @@ jobs:
     runs-on: ubuntu-18.04
 
     steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: 'recursive'
     - name: Cache apt-get packages
       uses: actions/cache@v2
       env:
@@ -162,6 +160,10 @@ jobs:
       with:
         version: 9
         platform: x64
+
+    - uses: actions/checkout@v2
+      with:
+            submodules: 'recursive'
 
     - name: Install libharfbuzz
       run: sudo apt install libharfbuzz-dev
@@ -243,7 +245,9 @@ jobs:
   build-mac:
 
     runs-on: macos-latest
+
     steps:
+
     - uses: actions/checkout@v2
       with:
             submodules: 'recursive'

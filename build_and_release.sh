@@ -5,7 +5,7 @@ echo "MAKE_PARALLEL set to $MAKE_PARALLEL"
 
 # download linuxdeployqt if not exists
 if [[ ! -f linuxdeployqt-continuous-x86_64.AppImage ]]; then
-	wget https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
+	wget -q https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
 	chmod +x linuxdeployqt-continuous-x86_64.AppImage
 fi
 
