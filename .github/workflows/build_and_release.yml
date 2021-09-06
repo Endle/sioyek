@@ -277,7 +277,7 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
         chmod +x build_mac.sh
-        MAKE_PARALLEL=$(nproc) ./build_mac.sh
+        MAKE_PARALLEL=$(sysctl -n hw.logicalcpu) ./build_mac.sh
         
     - name: upload mac artifact
       uses: actions/upload-artifact@v1
