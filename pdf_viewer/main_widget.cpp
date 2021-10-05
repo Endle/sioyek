@@ -52,6 +52,7 @@
 
 extern bool SHOULD_USE_MULTIPLE_MONITORS;
 extern bool FLAT_TABLE_OF_CONTENTS;
+extern bool HOVER_OVERVIEW;
 extern float MOVE_SCREEN_PERCENTAGE;
 extern std::wstring LIBGEN_ADDRESS;
 extern std::wstring INVERSE_SEARCH_COMMAND;
@@ -109,12 +110,29 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
 	int x = mouse_event->pos().x();
 	int y = mouse_event->pos().y();
 
-	if (main_document_view && main_document_view->get_link_in_pos(x, y)) {
+	std::optional<PdfLink> link = {};
+	if (main_document_view && (link = main_document_view->get_link_in_pos(x, y))) {
 		// show hand cursor when hovering over links
 		setCursor(Qt::PointingHandCursor);
+
+		if (HOVER_OVERVIEW) {
+			int page;
+			float offset_x, offset_y;
+			parse_uri(link.value().uri, &page, &offset_x, &offset_y);
+
+			int current_page = main_document_view->get_current_page_number();
+			float page_height = main_document_view->get_document()->get_page_height(current_page);
+
+			opengl_widget->set_overview_page(OverviewState{ page - 1, offset_y, page_height });
+			invalidate_render();
+		}
 	}
 	else {
 		setCursor(Qt::ArrowCursor);
+		if (HOVER_OVERVIEW) {
+			opengl_widget->set_overview_page({});
+			invalidate_render();
+		}
 	}
 
 	if (is_dragging) {
@@ -171,12 +189,21 @@ void MainWidget::closeEvent(QCloseEvent* close_event) {
 	delete helper_opengl_widget;
 }
 
-MainWidget::MainWidget(fz_context* mupdf_context, sqlite3* db, DocumentManager* document_manager, ConfigManager* config_manager, InputHandler* input_handler, bool* should_quit_ptr, QWidget* parent) : QWidget(parent),
-mupdf_context(mupdf_context),
-db(db),
-document_manager(document_manager),
-config_manager(config_manager),
-input_handler(input_handler)
+MainWidget::MainWidget(fz_context* mupdf_context,
+	DatabaseManager* db_manager,
+	DocumentManager* document_manager,
+	ConfigManager* config_manager,
+	InputHandler* input_handler,
+	CachedChecksummer* checksummer,
+	bool* should_quit_ptr,
+	QWidget* parent):
+	QWidget(parent),
+	mupdf_context(mupdf_context),
+	db_manager(db_manager),
+	document_manager(document_manager),
+	config_manager(config_manager),
+	input_handler(input_handler),
+	checksummer(checksummer)
 {
 	setMouseTracking(true);
 
@@ -188,10 +215,10 @@ input_handler(input_handler)
 	pdf_renderer->start_threads();
 
 
-	main_document_view = new DocumentView(mupdf_context, db, document_manager, config_manager);
+	main_document_view = new DocumentView(mupdf_context, db_manager, document_manager, config_manager, checksummer);
 	opengl_widget = new PdfViewOpenGLWidget(main_document_view, pdf_renderer, config_manager, false, this);
 
-	helper_document_view = new DocumentView(mupdf_context, db, document_manager, config_manager);
+	helper_document_view = new DocumentView(mupdf_context, db_manager, document_manager, config_manager, checksummer);
 	helper_opengl_widget = new PdfViewOpenGLWidget(helper_document_view, pdf_renderer, config_manager, true);
 
 	// automatically open the helper window in second monitor
@@ -352,7 +379,10 @@ std::wstring MainWidget::get_status_string() {
 		ss << " [ synctex ]";
 	}
 	if (this->mouse_drag_mode) {
-		ss << " [drag]";
+		ss << " [ drag ]";
+	}
+	if (opengl_widget->is_presentation_mode()) {
+		ss << " [ presentation mode ] ";
 	}
 
 	return ss.str();
@@ -393,6 +423,12 @@ void MainWidget::validate_render() {
 			main_document_view->fit_to_page_width(true);
 			last_smart_fit_page = current_page;
 		}
+	}
+	if (opengl_widget->is_presentation_mode()) {
+		int current_page = main_document_view->get_current_page_number();
+		opengl_widget->set_visible_page_number(current_page);
+		main_document_view->set_offset_y(main_document_view->get_document()->get_accum_page_height(current_page) + main_document_view->get_document()->get_page_height(current_page)/2);
+		main_document_view->fit_to_page_height_width_minimum();
 	}
 
 	if (main_document_view && main_document_view->get_document()) {
@@ -685,7 +721,7 @@ void MainWidget::update_link_with_opened_book_state(Link lnk, const OpenedBookSt
 		link_owner->update_link(lnk);
 	}
 
-	update_link(db, docpath,
+	db_manager->update_link(link_owner->get_checksum(),
 		new_state.offset_x, new_state.offset_y, new_state.zoom_level, lnk.src_offset_y);
 
 	link_to_edit = {};
@@ -716,7 +752,7 @@ void MainWidget::handle_command_with_symbol(const Command* command, char symbol)
 
 		// it is a global mark, we delete other marks with the same symbol from database and add the new mark
 		if (isupper(symbol)) {
-			delete_mark_with_symbol(db, symbol);
+			db_manager->delete_mark_with_symbol(symbol);
 			// we should also delete the cached marks
 			document_manager->delete_global_mark(symbol);
 			main_document_view->add_mark(symbol);
@@ -728,19 +764,22 @@ void MainWidget::handle_command_with_symbol(const Command* command, char symbol)
 
 	}
 	else if (command->name == "add_highlight") {
-		main_document_view->add_highlight({ selection_begin_x, selection_begin_y }, { selection_end_x, selection_end_y }, symbol);
-		opengl_widget->selected_character_rects.clear();
-		selected_text.clear();
+		if (opengl_widget->selected_character_rects.size() > 0) {
+			main_document_view->add_highlight({ selection_begin_x, selection_begin_y }, { selection_end_x, selection_end_y }, symbol);
+			opengl_widget->selected_character_rects.clear();
+			selected_text.clear();
+		}
 	}
 	else if (command->name == "goto_mark") {
 		assert(main_document_view);
 
 		if (isupper(symbol)) { // global mark
-			std::vector<std::pair<std::wstring, float>> mark_vector;
-			select_global_mark(db, symbol, mark_vector);
+			std::vector<std::pair<std::string, float>> mark_vector;
+			db_manager->select_global_mark(symbol, mark_vector);
 			if (mark_vector.size() > 0) {
 				assert(mark_vector.size() == 1); // we can not have more than one global mark with the same name
-				open_document(mark_vector[0].first, {}, mark_vector[0].second);
+				std::wstring doc_path = checksummer->get_path(mark_vector[0].first).value();
+				open_document(doc_path, {}, mark_vector[0].second);
 			}
 
 		}
@@ -750,6 +789,23 @@ void MainWidget::handle_command_with_symbol(const Command* command, char symbol)
 	}
 }
 
+void MainWidget::open_document(const LinkViewState& lvs) {
+	DocumentViewState dvs;
+	auto path = checksummer->get_path(lvs.document_checksum);
+	if (path) {
+		dvs.book_state = lvs.book_state;
+		dvs.document_path = path.value();
+		open_document(dvs);
+	}
+}
+
+void MainWidget::open_document_with_hash(const std::string& path, std::optional<float> offset_x, std::optional<float> offset_y, std::optional<float> zoom_level) {
+	std::optional<std::wstring> maybe_path = checksummer->get_path(path);
+	if (maybe_path) {
+		Path path(maybe_path.value());
+		open_document(path, offset_x, offset_y, zoom_level);
+	}
+}
 
 void MainWidget::open_document(const Path& path, std::optional<float> offset_x, std::optional<float> offset_y, std::optional<float> zoom_level) {
 
@@ -883,6 +939,7 @@ void MainWidget::key_event(bool released, QKeyEvent* kevent) {
 			kevent->key(),
 			kevent->modifiers() & Qt::ShiftModifier,
 			kevent->modifiers() & Qt::ControlModifier,
+			kevent->modifiers() & Qt::AltModifier,
 			&num_repeats);
 
 		if (command) {
@@ -1019,7 +1076,7 @@ void MainWidget::handle_left_click(float x, float y, bool down) {
 		is_selecting = false;
 		is_dragging = false;
 
-		if ((!mouse_drag_mode) && (manhattan_distance(last_mouse_down_x, last_mouse_down_y, x_, y_) > 20)){
+		if ((!mouse_drag_mode) && (manhattan_distance(last_mouse_down_x, last_mouse_down_y, x_, y_) > 5)){
 			fz_point selection_begin = { last_mouse_down_x, last_mouse_down_y };
 			fz_point selection_end = { x_, y_ };
 
@@ -1095,7 +1152,8 @@ void MainWidget::prev_state()
 		*/
 		if (link_to_edit) {
 
-			Document* link_owner = document_manager->get_document(link_to_edit.value().dst.document_path);
+			std::wstring link_document_path = checksummer->get_path(link_to_edit.value().dst.document_checksum).value();
+			Document* link_owner = document_manager->get_document(link_document_path);
 
 			OpenedBookState state = main_document_view->get_state().book_state;
 			link_to_edit.value().dst.book_state = state;
@@ -1104,7 +1162,7 @@ void MainWidget::prev_state()
 				link_owner->update_link(link_to_edit.value());
 			}
 
-			update_link(db, history[current_history_index].document_path,
+			db_manager->update_link(checksummer->get_checksum(history[current_history_index].document_path),
 				state.offset_x, state.offset_y, state.zoom_level, link_to_edit->src_offset_y);
 			link_to_edit = {};
 		}
@@ -1276,17 +1334,17 @@ void MainWidget::wheelEvent(QWheelEvent* wevent) {
 
 	if (!is_control_pressed) {
 		if (wevent->angleDelta().y() > 0) {
-			command = input_handler->handle_key(Qt::Key::Key_Up, false, false, &num_repeats);
+			command = input_handler->handle_key(Qt::Key::Key_Up, false, false, false, &num_repeats);
 		}
 		if (wevent->angleDelta().y() < 0) {
-			command = input_handler->handle_key(Qt::Key::Key_Down, false, false, &num_repeats);
+			command = input_handler->handle_key(Qt::Key::Key_Down, false, false, false ,&num_repeats);
 		}
 
 		if (wevent->angleDelta().x() > 0) {
-			command = input_handler->handle_key(Qt::Key::Key_Right, false, false, &num_repeats);
+			command = input_handler->handle_key(Qt::Key::Key_Left, false, false, false, &num_repeats);
 		}
 		if (wevent->angleDelta().x() < 0) {
-			command = input_handler->handle_key(Qt::Key::Key_Left, false, false, &num_repeats);
+			command = input_handler->handle_key(Qt::Key::Key_Right, false, false, false, &num_repeats);
 		}
 	}
 
@@ -1376,7 +1434,7 @@ void MainWidget::handle_command(const Command* command, int num_repeats) {
 	}
 	if (command->name == "goto_begining") {
 		if (num_repeats) {
-			main_document_view->goto_page(num_repeats-1);
+			main_document_view->goto_page(num_repeats - 1);
 		}
 		else {
 			main_document_view->set_offset_y(0.0f);
@@ -1386,36 +1444,60 @@ void MainWidget::handle_command(const Command* command, int num_repeats) {
 	if (command->name == "goto_end") {
 		main_document_view->goto_end();
 	}
+
 	if (command->name == "copy") {
 		copy_to_clipboard(selected_text);
 	}
 
 	int rp = std::max(num_repeats, 1);
 
-	if (command->name == "screen_down") {
-		move_document_screens(1 * rp);
+	if (!opengl_widget->is_presentation_mode()) {
+		if (command->name == "screen_down") {
+			move_document_screens(1 * rp);
+		}
+		if (command->name == "screen_up") {
+			move_document_screens(-1 * rp);
+		}
+		if (command->name == "move_down") {
+			move_document(0.0f, 72.0f * rp * VERTICAL_MOVE_AMOUNT);
+		}
+		if (command->name == "move_up") {
+			move_document(0.0f, -72.0f * rp * VERTICAL_MOVE_AMOUNT);
+		}
+
+		if (command->name == "move_right") {
+			main_document_view->move(72.0f * rp * HORIZONTAL_MOVE_AMOUNT, 0.0f);
+			last_smart_fit_page = {};
+		}
+
+		if (command->name == "move_left") {
+			main_document_view->move(-72.0f * rp * HORIZONTAL_MOVE_AMOUNT, 0.0f);
+			last_smart_fit_page = {};
+		}
 	}
-	if (command->name == "screen_up") {
-		move_document_screens(-1 * rp);
-	}
-	if (command->name == "move_down") {
-		move_document(0.0f, 72.0f * rp * VERTICAL_MOVE_AMOUNT);
-	}
-	else if (command->name == "move_up") {
-		move_document(0.0f, -72.0f * rp * VERTICAL_MOVE_AMOUNT);
+	else {
+		if (command->name == "screen_down") {
+			main_document_view->move_pages(1);
+		}
+		if (command->name == "screen_up") {
+			main_document_view->move_pages(-1);
+		}
+		if (command->name == "move_down") {
+			main_document_view->move_pages(1);
+		}
+		if (command->name == "move_up") {
+			main_document_view->move_pages(-1);
+		}
+		if (command->name == "move_left") {
+			main_document_view->move_pages(1);
+		}
+		if (command->name == "move_right") {
+			main_document_view->move_pages(-1);
+		}
 	}
 
-	else if (command->name == "move_right") {
-		main_document_view->move(72.0f * rp * HORIZONTAL_MOVE_AMOUNT, 0.0f);
-		last_smart_fit_page = {};
-	}
 
-	else if (command->name == "move_left") {
-		main_document_view->move(-72.0f * rp * HORIZONTAL_MOVE_AMOUNT, 0.0f);
-		last_smart_fit_page = {};
-	}
-
-	else if (command->name == "link") {
+	if (command->name == "link") {
 		handle_link();
 	}
 
@@ -1506,6 +1588,7 @@ void MainWidget::handle_command(const Command* command, int num_repeats) {
 			}
 			else {
 
+				std::vector<int> selected_index = main_document_view->get_current_chapter_recursive_index();
 				current_widget = std::make_unique<FilteredTreeSelect<int>>(main_document_view->get_document()->get_toc_model(),
 					[&](const std::vector<int>& indices) {
 						TocNode* toc_node = get_toc_node_from_indices(main_document_view->get_document()->get_toc(),
@@ -1516,37 +1599,61 @@ void MainWidget::handle_command(const Command* command, int num_repeats) {
 							main_document_view->goto_page(toc_node->page);
 							push_state();
 						}
-					}, config_manager, this);
+					}, config_manager, this, selected_index);
 				current_widget->show();
 			}
 
 		}
+		else {
+			show_error_message(L"This document doesn't have a table of contents");
+		}
 	}
 	else if (command->name == "open_prev_doc") {
-		std::vector<std::wstring> opened_docs_paths;
+		//std::vector<std::pair<std::wstring, std::wstring>> opened_docs_hash_path_pairs;
 		std::vector<std::wstring> opened_docs_names;
-		select_prev_docs(db, opened_docs_paths);
+		std::vector<std::wstring> opened_docs_hashes_;
+		std::vector<std::string> opened_docs_hashes;
 
-		for (const auto& p : opened_docs_paths) {
-			opened_docs_names.push_back(Path(p).filename().value_or(L"<ERROR>"));
+		db_manager->select_opened_books_path_values(opened_docs_hashes_);
+
+		for (const auto& doc_hash_ : opened_docs_hashes_) {
+			std::optional<std::wstring> path = checksummer->get_path(utf8_encode(doc_hash_));
+			if (path) {
+				opened_docs_names.push_back(Path(path.value()).filename().value_or(L"<ERROR>"));
+				opened_docs_hashes.push_back(utf8_encode(doc_hash_));
+			}
 		}
+		//db_manager->get_prev_path_hash_pairs(opened_docs_hash_path_pairs);
 
-		if (opened_docs_paths.size() > 0) {
-			current_widget = std::make_unique<FilteredSelectWindowClass<std::wstring>>(opened_docs_names,
-				opened_docs_paths,
-				[&](std::wstring* doc_path) {
-					if (doc_path->size() > 0) {
+		//for (const auto& [path, hash] : opened_docs_hash_path_pairs) {
+		//	opened_docs_names.push_back(Path(path).filename().value_or(L"<ERROR>"));
+		//	opened_docs_hashes.push_back(utf8_encode(hash));
+		//}
+
+		if (opened_docs_hashes.size() > 0) {
+			current_widget = std::make_unique<FilteredSelectWindowClass<std::string>>(opened_docs_names,
+				opened_docs_hashes,
+				[&](std::string* doc_hash) {
+					if (doc_hash->size() > 0) {
 						validate_render();
-						open_document(*doc_path);
+						open_document_with_hash(*doc_hash);
 					}
 				},
 				config_manager,
-				this,
-				[&](std::wstring* doc_path) {
-					delete_opened_book(db, *doc_path);
+					this,
+					[&](std::string* doc_hash) {
+					db_manager->delete_opened_book(*doc_hash);
 				});
 			current_widget->show();
 		}
+	}
+	else if (command->name == "open_document_embedded") {
+		current_widget = std::make_unique<FileSelector>(
+			[&](std::wstring doc_path) {
+				validate_render();
+				open_document(doc_path);
+			}, this);
+		current_widget->show();
 	}
 	else if (command->name == "goto_bookmark") {
 		std::vector<std::wstring> option_names;
@@ -1615,19 +1722,20 @@ void MainWidget::handle_command(const Command* command, int num_repeats) {
 		current_widget->show();
 	}
 	else if (command->name == "goto_bookmark_g") {
-		std::vector<std::pair<std::wstring, BookMark>> global_bookmarks;
-		global_select_bookmark(db, global_bookmarks);
+		std::vector<std::pair<std::string, BookMark>> global_bookmarks;
+		db_manager->global_select_bookmark(global_bookmarks);
 		std::vector<std::wstring> descs;
 		std::vector<BookState> book_states;
 
 		for (const auto& desc_bm_pair : global_bookmarks) {
-			std::wstring path = desc_bm_pair.first;
-			BookMark bm = desc_bm_pair.second;
-
-			std::wstring file_name = Path(path).filename().value_or(L"");
-
-			descs.push_back(bm.description + L" {" + file_name + L"}");
-			book_states.push_back({ path, bm.y_offset });
+			std::string checksum = desc_bm_pair.first;
+			std::optional<std::wstring> path = checksummer->get_path(checksum);
+			if (path) {
+				BookMark bm = desc_bm_pair.second;
+				std::wstring file_name = Path(path.value()).filename().value_or(L"");
+				descs.push_back(bm.description + L" {" + file_name + L"}");
+				book_states.push_back({ path.value(), bm.y_offset });
+			}
 		}
 		current_widget = std::make_unique<FilteredSelectWindowClass<BookState>>(
 			descs,
@@ -1642,29 +1750,33 @@ void MainWidget::handle_command(const Command* command, int num_repeats) {
 			this,
 			[&](BookState* book_state) {
 				if (book_state) {
-					delete_bookmark(db, book_state->document_path, book_state->offset_y);
+					db_manager->delete_bookmark(checksummer->get_checksum(book_state->document_path), book_state->offset_y);
 				}
 			});
 		current_widget->show();
 
 	}
 	else if (command->name == "goto_highlight_g") {
-		std::vector<std::pair<std::wstring, Highlight>> global_highlights;
-		global_select_highlight(db, global_highlights);
+		std::vector<std::pair<std::string, Highlight>> global_highlights;
+		db_manager->global_select_highlight(global_highlights);
 		std::vector<std::wstring> descs;
 		std::vector<BookState> book_states;
 
 		for (const auto& desc_hl_pair : global_highlights) {
-			std::wstring path = desc_hl_pair.first;
-			Highlight hl = desc_hl_pair.second;
+			std::string checksum = desc_hl_pair.first;
+			std::optional<std::wstring> path = checksummer->get_path(checksum);
+			if (path) {
+				Highlight hl = desc_hl_pair.second;
 
-			std::wstring file_name = Path(path).filename().value_or(L"");
+				std::wstring file_name = Path(path.value()).filename().value_or(L"");
 
-			std::wstring highlight_type_string = L"a";
-			highlight_type_string[0] = hl.type;
+				std::wstring highlight_type_string = L"a";
+				highlight_type_string[0] = hl.type;
 
-			descs.push_back(L"[" + highlight_type_string + L"]" + hl.description + L" {" + file_name + L"}");
-			book_states.push_back({ path, hl.selection_begin.y });
+				descs.push_back(L"[" + highlight_type_string + L"]" + hl.description + L" {" + file_name + L"}");
+				book_states.push_back({ path.value(), hl.selection_begin.y });
+
+			}
 		}
 		current_widget = std::make_unique<FilteredSelectWindowClass<BookState>>(
 			descs,
@@ -1683,6 +1795,9 @@ void MainWidget::handle_command(const Command* command, int num_repeats) {
 
 	else if (command->name == "toggle_fullscreen") {
 		toggle_fullscreen();
+	}
+	else if (command->name == "toggle_presentation_mode") {
+		toggle_presentation_mode();
 	}
 	else if (command->name == "toggle_one_window") {
 		toggle_two_window_mode();
@@ -1736,14 +1851,6 @@ void MainWidget::handle_command(const Command* command, int num_repeats) {
 		QApplication::quit();
 	}
 	else if (command->name == "debug") {
-		wprintf(L"_________________________________\n");
-		for (auto& x : history) {
-			//std::wcout << x.document_path << "\n";
-			wprintf(x.document_path.c_str());
-			wprintf(L"\n");
-		}
-		wprintf(L"_________________________________\n");
-		int b = 2;
 
 	}
 
@@ -1759,7 +1866,7 @@ void MainWidget::handle_link() {
 
 	if (is_pending_link_source_filled()) {
 		auto [source_path, pl] = pending_link.value();
-		pl.dst = main_document_view->get_state();
+		pl.dst = main_document_view->get_checksum_state();
 		pending_link = {};
 
 		if (source_path == main_document_view->get_document()->get_path()) {
@@ -1773,9 +1880,8 @@ void MainWidget::handle_link() {
 				}
 			}
 
-			insert_link(db,
-				source_path.value(),
-				pl.dst.document_path,
+			db_manager->insert_link(checksummer->get_checksum(source_path.value()),
+				pl.dst.document_checksum,
 				pl.dst.book_state.offset_x,
 				pl.dst.book_state.offset_y,
 				pl.dst.book_state.zoom_level,
@@ -1868,23 +1974,27 @@ void MainWidget::handle_pending_text_command(std::wstring text) {
 			open_file(default_keys_path.get_path());
 		}
 		else if (text == L"keys_user") {
-			for (int i = user_keys_paths.size() - 1; i >= 0; i--) {
-				if (user_keys_paths[i].file_exists()) {
-					open_file(user_keys_paths[i].get_path());
-					break;
-				}
+			std::optional<Path> key_file_path = input_handler->get_or_create_user_keys_path();
+			if (key_file_path) {
+				open_file(key_file_path.value().get_path());
 			}
 		}
 		else if (text == L"prefs") {
 			open_file(default_config_path.get_path());
 		}
 		else if (text == L"prefs_user") {
-			for (int i = user_config_paths.size() - 1; i >= 0; i--) {
-				if (user_config_paths[i].file_exists()) {
-					open_file(user_config_paths[i].get_path());
-					break;
-				}
+			std::optional<Path> pref_file_path = config_manager->get_or_create_user_config_file();
+			if (pref_file_path) {
+				open_file(pref_file_path.value().get_path());
 			}
+		}
+		else if (text == L"export") {
+			std::wstring export_file_name = select_new_json_file_name();
+			db_manager->export_json(export_file_name, checksummer);
+		}
+		else if (text == L"import") {
+			std::wstring import_file_name = select_json_file_name();
+			db_manager->import_json(import_file_name, checksummer);
 		}
 	}
 }
@@ -1900,7 +2010,16 @@ void MainWidget::toggle_fullscreen() {
 	}
 }
 
-void MainWidget::complete_pending_link(const DocumentViewState& destination_view_state)
+void MainWidget::toggle_presentation_mode() {
+	if (opengl_widget->is_presentation_mode()) {
+		opengl_widget->set_visible_page_number({});
+	}
+	else {
+		opengl_widget->set_visible_page_number(main_document_view->get_current_page_number());
+	}
+}
+
+void MainWidget::complete_pending_link(const LinkViewState& destination_view_state)
 {
 	Link& pl = pending_link.value().second;
 	pl.dst = destination_view_state;
@@ -1923,8 +2042,8 @@ void MainWidget::long_jump_to_destination(int page, float offset_x, float offset
 		// if we press the link button and then click on a pdf link, we automatically link to the
 		// link's destination
 
-		DocumentViewState dest_state;
-		dest_state.document_path = main_document_view->get_document()->get_path();
+		LinkViewState dest_state;
+		dest_state.document_checksum = main_document_view->get_document()->get_checksum();
 		dest_state.book_state.offset_x = offset_x;
 		dest_state.book_state.offset_y = main_document_view->get_page_offset(page) + offset_y;
 		dest_state.book_state.zoom_level = main_document_view->get_zoom_level();

@@ -17,10 +17,13 @@ extern bool SHOULD_LOAD_TUTORIAL_WHEN_NO_OTHER_FILE;
 extern bool SHOULD_LAUNCH_NEW_INSTANCE;
 extern bool SHOULD_CHECK_FOR_LATEST_VERSION_ON_STARTUP;
 extern bool SHOULD_DRAW_UNRENDERED_PAGES;
+extern bool HOVER_OVERVIEW;
+extern bool DEFAULT_DARK_MODE;
 extern float HIGHLIGHT_COLORS[26 * 3];
 extern std::wstring LIBGEN_ADDRESS;
 extern std::wstring GOOGLE_SCHOLAR_ADDRESS;
 extern std::wstring INVERSE_SEARCH_COMMAND;
+extern std::wstring SHARED_DATABASE_PATH;
 
 template<typename T>
 void* generic_deserializer(std::wstringstream& stream, void* res_) {
@@ -95,6 +98,7 @@ Config* ConfigManager::get_mut_config_with_name(std::wstring config_name) {
 
 ConfigManager::ConfigManager(const Path& default_path, const std::vector<Path>& user_paths) {
 
+	user_config_paths = user_paths;
 	auto vec3_serializer = vec_n_serializer<3>;
 	auto vec4_serializer = vec_n_serializer<4>;
 	auto vec3_deserializer = vec_n_deserializer<3>;
@@ -112,6 +116,7 @@ ConfigManager::ConfigManager(const Path& default_path, const std::vector<Path>& 
 	configs.push_back({ L"background_color", BACKGROUND_COLOR, vec3_serializer, vec3_deserializer });
 	configs.push_back({ L"dark_mode_background_color", DARK_MODE_BACKGROUND_COLOR, vec3_serializer, vec3_deserializer });
 	configs.push_back({ L"dark_mode_contrast", &DARK_MODE_CONTRAST, float_serializer, float_deserializer });
+	configs.push_back({ L"default_dark_mode", &DEFAULT_DARK_MODE, bool_serializer, bool_deserializer });
 	configs.push_back({ L"google_scholar_address", &GOOGLE_SCHOLAR_ADDRESS, string_serializer, string_deserializer });
 	configs.push_back({ L"inverse_search_command", &INVERSE_SEARCH_COMMAND, string_serializer, string_deserializer });
 	configs.push_back({ L"libgen_address", &LIBGEN_ADDRESS, string_serializer, string_deserializer });
@@ -125,6 +130,8 @@ ConfigManager::ConfigManager(const Path& default_path, const std::vector<Path>& 
 	configs.push_back({ L"should_launch_new_instance", &SHOULD_LAUNCH_NEW_INSTANCE, bool_serializer, bool_deserializer });
 	configs.push_back({ L"should_draw_unrendered_pages", &SHOULD_DRAW_UNRENDERED_PAGES, bool_serializer, bool_deserializer });
 	configs.push_back({ L"check_for_updates_on_startup", &SHOULD_CHECK_FOR_LATEST_VERSION_ON_STARTUP, bool_serializer, bool_deserializer });
+	configs.push_back({ L"shared_database_path", &SHARED_DATABASE_PATH, string_serializer, string_deserializer });
+	configs.push_back({ L"hover_overview", &HOVER_OVERVIEW, bool_serializer, bool_deserializer });
 
 	std::wstring highlight_config_string = L"highlight_color_a";
 	for (char highlight_type = 'a'; highlight_type <= 'z'; highlight_type++) {
@@ -195,4 +202,19 @@ void ConfigManager::deserialize(const Path& default_file_path, const std::vector
 		}
 
 	}
+}
+
+std::optional<Path> ConfigManager::get_or_create_user_config_file() {
+	if (user_config_paths.size() == 0) {
+		return {};
+	}
+
+	for (int i = user_config_paths.size() - 1; i >= 0; i--) {
+		if (user_config_paths[i].file_exists()) {
+			return user_config_paths[i];
+		}
+	}
+	user_config_paths.back().file_parent().create_directories();
+	create_file_if_not_exists(user_config_paths.back().get_path());
+	return user_config_paths.back();
 }

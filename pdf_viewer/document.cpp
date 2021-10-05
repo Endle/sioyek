@@ -6,6 +6,9 @@
 #include <qdatetime.h>
 #include <map>
 #include <regex>
+#include <qcryptographichash.h>
+
+#include "checksum.h"
 
 int Document::get_mark_index(char symbol) {
 	for (int i = 0; i < marks.size(); i++) {
@@ -17,21 +20,40 @@ int Document::get_mark_index(char symbol) {
 }
 
 void Document::load_document_metadata_from_db() {
+	std::string checksum = get_checksum();
+	db_manager->insert_document_hash(get_path(), checksum);
 	marks.clear();
 	bookmarks.clear();
 	highlights.clear();
-	select_mark(db, file_name, marks);
-	select_bookmark(db, file_name, bookmarks);
-	select_highlight(db, file_name, highlights);
-	select_links(db, file_name, links);
+	links.clear();
+	links.clear();
+	db_manager->select_mark(checksum, marks);
+	db_manager->select_bookmark(checksum, bookmarks);
+	db_manager->select_highlight(checksum, highlights);
+	db_manager->select_links(checksum, links);
 }
 
 
 void Document::add_bookmark(const std::wstring& desc, float y_offset) {
 	bookmarks.push_back({y_offset, desc});
-	insert_bookmark(db, file_name, desc, y_offset);
+	db_manager->insert_bookmark(get_checksum(), desc, y_offset);
 }
 
+void Document::fill_highlight_rects(fz_context* ctx) {
+
+	for (int i = 0; i < highlights.size(); i++) {
+
+		const Highlight& highlight = highlights[i];
+		std::vector<fz_rect> highlight_rects;
+		std::vector<fz_rect> merged_rects;
+		std::wstring highlight_text;
+		get_text_selection(ctx, highlight.selection_begin, highlight.selection_end, true, highlight_rects, highlight_text);
+
+		merge_selected_character_rects(highlight_rects, merged_rects);
+
+		highlights[i].highlight_rects = std::move(merged_rects);
+	}
+}
 void Document::add_highlight(const std::wstring& desc,
 	const std::vector<fz_rect>& highlight_rects,
 	fz_point selection_begin,
@@ -50,8 +72,8 @@ void Document::add_highlight(const std::wstring& desc,
 	highlight.highlight_rects = highlight_rects;
 
 	highlights.push_back(highlight);
-	insert_highlight(db,
-		file_name,
+	db_manager->insert_highlight(
+		get_checksum(),
 		desc,
 		selection_begin.x,
 		selection_begin.y,
@@ -68,9 +90,9 @@ bool Document::get_is_indexing()
 void Document::add_link(Link link, bool insert_into_database) {
 	links.push_back(link);
 	if (insert_into_database) {
-		insert_link(db,
-			get_path(),
-			link.dst.document_path,
+		db_manager->insert_link(
+			get_checksum(),
+			link.dst.document_checksum,
 			link.dst.book_state.offset_x,
 			link.dst.book_state.offset_y,
 			link.dst.book_state.zoom_level,
@@ -81,6 +103,11 @@ void Document::add_link(Link link, bool insert_into_database) {
 std::wstring Document::get_path() {
 
 	return file_name;
+}
+
+std::string Document::get_checksum() {
+
+	return checksummer->get_checksum(get_path());
 }
 
 int Document::find_closest_bookmark_index(float to_offset_y) {
@@ -95,7 +122,7 @@ int Document::find_closest_bookmark_index(float to_offset_y) {
 void Document::delete_closest_bookmark(float to_y_offset) {
 	int closest_index = find_closest_bookmark_index(to_y_offset);
 	if (closest_index > -1) {
-		delete_bookmark(db, get_path(), bookmarks[closest_index].y_offset);
+		db_manager->delete_bookmark( get_checksum(), bookmarks[closest_index].y_offset);
 		bookmarks.erase(bookmarks.begin() + closest_index);
 	}
 }
@@ -104,8 +131,8 @@ void Document::delete_highlight_with_index(int index)
 {
 	Highlight highlight_to_delete = highlights[index];
 
-	delete_highlight(db,
-		get_path(),
+	db_manager->delete_highlight(
+		get_checksum(),
 		highlight_to_delete.selection_begin.x,
 		highlight_to_delete.selection_begin.y,
 		highlight_to_delete.selection_end.x,
@@ -160,7 +187,7 @@ bool Document::update_link(Link new_link)
 void Document::delete_closest_link(float to_offset_y) {
 	int closest_index = -1;
 	if (find_closest_link(to_offset_y, &closest_index)) {
-		delete_link(db, get_path(), links[closest_index].src_offset_y);
+		db_manager->delete_link( get_checksum(), links[closest_index].src_offset_y);
 		links.erase(links.begin() + closest_index);
 	}
 }
@@ -192,11 +219,11 @@ void Document::add_mark(char symbol, float y_offset) {
 	int current_mark_index = get_mark_index(symbol);
 	if (current_mark_index == -1) {
 		marks.push_back({ y_offset, symbol });
-		insert_mark(db, file_name, symbol, y_offset);
+		db_manager->insert_mark( get_checksum(), symbol, y_offset);
 	}
 	else {
 		marks[current_mark_index].y_offset = y_offset;
-		update_mark(db, file_name, symbol, y_offset);
+		db_manager->update_mark( get_checksum(), symbol, y_offset);
 	}
 }
 
@@ -220,7 +247,12 @@ bool Document::get_mark_location_if_exists(char symbol, float* y_offset) {
 	return true;
 }
 
-Document::Document(fz_context* context, std::wstring file_name, sqlite3* db) : context(context), file_name(file_name), doc(nullptr), db(db) {
+Document::Document(fz_context* context, std::wstring file_name, DatabaseManager* db, CachedChecksummer* checksummer) :
+	context(context),
+	file_name(file_name),
+	doc(nullptr),
+	db_manager(db),
+	checksummer(checksummer){
 	last_update_time = QDateTime::currentDateTime();
 }
 
@@ -512,7 +544,7 @@ bool Document::open(bool* invalid_flag, bool force_load_dimensions) {
 			std::wcerr << "could not open " << file_name << std::endl;
 		}
 		if (doc != nullptr) {
-			load_document_metadata_from_db();
+			//load_document_metadata_from_db();
 			load_page_dimensions(force_load_dimensions);
 			create_toc_tree(top_level_toc_nodes);
 			get_flat_toc(top_level_toc_nodes, flat_toc_names, flat_toc_pages);
@@ -585,6 +617,7 @@ void Document::load_page_dimensions(bool force_load_now) {
 		fz_context* context_ = fz_clone_context(context);
 		fz_document* doc_ = fz_open_document(context_, utf8_encode(file_name).c_str());
 		//fz_layout_document(context_, doc, 600, 800, 20);
+		load_document_metadata_from_db();
 
 		float acc_height_ = 0.0f;
 		for (int i = 0; i < n; i++) {
@@ -603,7 +636,6 @@ void Document::load_page_dimensions(bool force_load_now) {
 		}
 
 		fz_drop_document(context_, doc_);
-		fz_drop_context(context_);
 
 		page_dims_mutex.lock();
 
@@ -616,18 +648,8 @@ void Document::load_page_dimensions(bool force_load_now) {
 		}
 		page_dims_mutex.unlock();
 
-		for (int i = 0; i < highlights.size(); i++) {
-
-			const Highlight& highlight = highlights[i];
-			std::vector<fz_rect> highlight_rects;
-			std::vector<fz_rect> merged_rects;
-			std::wstring highlight_text;
-			get_text_selection(highlight.selection_begin, highlight.selection_end, true, highlight_rects, highlight_text);
-
-			merge_selected_character_rects(highlight_rects, merged_rects);
-
-			highlights[i].highlight_rects = std::move(merged_rects);
-		}
+		fill_highlight_rects(context_);
+		fz_drop_context(context_);
 
 		are_highlights_loaded = true;
 
@@ -672,8 +694,12 @@ int Document::num_pages() {
 	return pages;
 }
 
-DocumentManager::DocumentManager(fz_context* mupdf_context, sqlite3* database) : mupdf_context(mupdf_context), database(database)
+DocumentManager::DocumentManager(fz_context* mupdf_context, DatabaseManager* db, CachedChecksummer* checksummer) :
+	mupdf_context(mupdf_context),
+	db_manager(db),
+	checksummer(checksummer)
 {
+	//get_prev_path_hash_pairs(database, const std::string& path, std::vector<std::pair<std::wstring, std::wstring>>& out_pairs);
 }
 
 
@@ -681,7 +707,7 @@ Document* DocumentManager::get_document(const std::wstring& path) {
 	if (cached_documents.find(path) != cached_documents.end()) {
 		return cached_documents.at(path);
 	}
-	Document* new_doc = new Document(mupdf_context, path, database);
+	Document* new_doc = new Document(mupdf_context, path, db_manager, checksummer);
 	cached_documents[path] = new_doc;
 	return new_doc;
 }
@@ -699,7 +725,11 @@ void DocumentManager::delete_global_mark(char symbol)
 }
 
 
-fz_stext_page* Document::get_stext_with_page_number(int page_number)
+fz_stext_page* Document::get_stext_with_page_number(int page_number) {
+	return get_stext_with_page_number(context, page_number);
+}
+
+fz_stext_page* Document::get_stext_with_page_number(fz_context* ctx, int page_number)
 {
 	const int MAX_CACHED_STEXT_PAGES = 10;
 
@@ -711,17 +741,17 @@ fz_stext_page* Document::get_stext_with_page_number(int page_number)
 
 	fz_stext_page* stext_page = nullptr;
 
-	fz_try(context) {
-		stext_page = fz_new_stext_page_from_page_number(context, doc, page_number, nullptr);
+	fz_try(ctx) {
+		stext_page = fz_new_stext_page_from_page_number(ctx, doc, page_number, nullptr);
 	}
-	fz_catch(context) {
+	fz_catch(ctx) {
 
 	}
 
 	if (stext_page != nullptr) {
 
 		if (cached_stext_pages.size() == MAX_CACHED_STEXT_PAGES) {
-			fz_drop_stext_page(context, cached_stext_pages[0].second);
+			fz_drop_stext_page(ctx, cached_stext_pages[0].second);
 			cached_stext_pages.erase(cached_stext_pages.begin());
 		}
 		cached_stext_pages.push_back(std::make_pair(page_number, stext_page));
@@ -1178,6 +1208,13 @@ void Document::get_text_selection(fz_point selection_begin,
 	bool is_word_selection, // when in word select mode, we select entire words even if the range only partially includes the word
 	std::vector<fz_rect>& selected_characters,
 	std::wstring& selected_text) {
+	get_text_selection(context, selection_begin, selection_end, is_word_selection, selected_characters, selected_text);
+}
+void Document::get_text_selection(fz_context* ctx, fz_point selection_begin,
+	fz_point selection_end,
+	bool is_word_selection, // when in word select mode, we select entire words even if the range only partially includes the word
+	std::vector<fz_rect>& selected_characters,
+	std::wstring& selected_text) {
 
 	// selected_characters are in absolute document space
 	int page_begin, page_end;
@@ -1212,7 +1249,7 @@ void Document::get_text_selection(fz_point selection_begin,
 	for (int i = page_begin; i <= page_end; i++) {
 
 		// for now, let's assume there is only one page
-		fz_stext_page* stext_page = get_stext_with_page_number(i);
+		fz_stext_page* stext_page = get_stext_with_page_number(ctx, i);
 		if (!stext_page) continue;
 
 		std::vector<fz_stext_char*> flat_chars;

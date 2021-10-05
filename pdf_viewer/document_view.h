@@ -23,6 +23,7 @@
 #include "utils.h"
 #include "config.h"
 #include "ui.h"
+#include "checksum.h"
 
 extern float ZOOM_INC_FACTOR;
 extern const int PAGE_PADDINGS;
@@ -32,9 +33,10 @@ protected:
 
 private:
 	fz_context* mupdf_context = nullptr;
-	sqlite3* database = nullptr;
+	DatabaseManager* db_manager = nullptr;
 	ConfigManager* config_manager = nullptr;
 	DocumentManager* document_manager = nullptr;
+	CachedChecksummer* checksummer;
 	Document* current_document = nullptr;
 
 	float zoom_level = 0;
@@ -47,12 +49,13 @@ private:
 	int view_height = 0;
 
 public:
-	DocumentView( fz_context* mupdf_context, sqlite3* db,  DocumentManager* document_manager, ConfigManager* config_manager);
-	DocumentView( fz_context* mupdf_context, sqlite3* db,  DocumentManager* document_manager, ConfigManager* config_manager, bool* invalid_flag,
+	DocumentView( fz_context* mupdf_context, DatabaseManager* db_manager,  DocumentManager* document_manager, ConfigManager* config_manager, CachedChecksummer* checksummer);
+	DocumentView( fz_context* mupdf_context, DatabaseManager* db_manager,  DocumentManager* document_manager, ConfigManager* config_manager, CachedChecksummer* checksummer, bool* invalid_flag,
 		std::wstring path, int view_width, int view_height, float offset_x, float offset_y);
 	~DocumentView();
 	float get_zoom_level();
 	DocumentViewState get_state();
+	LinkViewState get_checksum_state();
 	void set_opened_book_state(const OpenedBookState& state);
 	void handle_escape();
 	void set_book_state(OpenedBookState state);
@@ -106,11 +109,14 @@ public:
 	void goto_offset_within_page(int page, float offset_y);
 	void goto_page(int page);
 	void fit_to_page_width(bool smart=false);
+	void fit_to_page_height_width_minimum();
 	void persist();
 	std::wstring get_current_chapter_name();
 	std::optional<std::pair<int,int>> get_current_page_range();
 	int get_current_chapter_index();
 	void goto_chapter(int diff);
+	void get_page_chapter_index(int page, std::vector<TocNode*> toc_nodes, std::vector<int>& res);
+	std::vector<int> get_current_chapter_recursive_index();
 	float view_height_in_document_space();
 	void set_vertical_line_pos(float pos);
 	float get_vertical_line_pos();

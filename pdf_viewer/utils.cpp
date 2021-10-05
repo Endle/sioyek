@@ -65,8 +65,12 @@ QStandardItem* get_item_tree_from_toc_helper(const std::vector<TocNode*>& childr
 
 	for (const auto* child : children) {
 		QStandardItem* child_item = new QStandardItem(QString::fromStdWString(child->title));
+		QStandardItem* page_item = new QStandardItem("[ " + QString::number(child->page) + " ]");
 		child_item->setData(child->page);
-		parent->appendRow(get_item_tree_from_toc_helper(child->children, child_item));
+		page_item->setTextAlignment(Qt::AlignVCenter | Qt::AlignRight);
+
+		get_item_tree_from_toc_helper(child->children, child_item);
+		parent->appendRow(QList<QStandardItem*>() << child_item << page_item);
 	}
 	return parent;
 }
@@ -1096,6 +1100,14 @@ QStringList deserialize_string_array(const QByteArray &byte_array) {
 
 
 
+char* get_argv_value(int argc, char** argv, std::string key) {
+	for (int i = 0; i < argc-1; i++) {
+		if (key == argv[i]) {
+			return argv[i + 1];
+		}
+	}
+	return nullptr;
+}
 bool should_reuse_instance(int argc, char** argv) {
 	for (int i = 0; i < argc; i++) {
 		if (std::strcmp(argv[i], "--reuse-instance") == 0) return true;
@@ -1119,6 +1131,7 @@ QCommandLineParser* get_command_line_parser() {
 	parser->setApplicationDescription("Sioyek is a PDF reader designed for reading research papers and technical books.");
 	parser->addHelpOption();
 	parser->addVersionOption();
+
 
 	QCommandLineOption reuse_instance_option("reuse-instance");
 	reuse_instance_option.setDescription("When opening a new file, reuse the previous instance of sioyek instead of opening a new window.");
@@ -1149,6 +1162,9 @@ QCommandLineParser* get_command_line_parser() {
 
 	QCommandLineOption yloc_option("yloc", "Set y position within page to <yloc>.", "yloc");
 	parser->addOption(yloc_option);
+
+	QCommandLineOption shared_database_path_option("shared-database-path", "Specify which file to use for shared data (bookmarks, highlights, etc.)", "path");
+	parser->addOption(shared_database_path_option);
 
 	return parser;
 }
@@ -1253,4 +1269,40 @@ void check_for_updates(QWidget* parent, std::string current_version) {
 		}
 		});
 	manager->get(QNetworkRequest(QUrl(url)));
+}
+
+QString expand_home_dir(QString path) {
+	if (path.size() > 0) {
+		if (path.at(0) == '~') {
+			return QDir::homePath() + QDir::separator() + path.remove(0, 1);
+		}
+	}
+	return path;
+}
+
+void split_root_file(QString path, QString& out_root, QString& out_partial) {
+
+	QChar sep = QDir::separator();
+	QStringList parts = path.split(sep);
+
+	if (path.size() > 0) {
+		if (path.back() == sep) {
+			out_root = parts.join(sep);
+		}
+		else {
+			if ((parts.size() == 2) && (path.at(0) == '/')) {
+				out_root = "/";
+				out_partial = parts.at(1);
+			}
+			else {
+				out_partial = parts.back();
+				parts.pop_back();
+				out_root = parts.join(sep);
+			}
+		}
+	}
+	else {
+		out_partial = "";
+		out_root = "";
+	}
 }

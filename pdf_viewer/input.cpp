@@ -53,6 +53,7 @@ CommandManager::CommandManager() {
 	commands.push_back({ "goto_link", false, false , false, false});
 	commands.push_back({ "edit_link", false, false , false, false});
 	commands.push_back({ "open_prev_doc", false, false , false, false});
+	commands.push_back({ "open_document_embedded", false, false , false, false});
 	commands.push_back({ "copy", false, false , false, false});
 	commands.push_back({ "toggle_fullscreen", false, false , false, false});
 	commands.push_back({ "toggle_one_window", false, false , false, false});
@@ -67,6 +68,7 @@ CommandManager::CommandManager() {
 	commands.push_back({ "next_chapter", false, false , false, true});
 	commands.push_back({ "prev_chapter", false, false , false, true});
 	commands.push_back({ "toggle_dark_mode", false, false , false, false});
+	commands.push_back({ "toggle_presentation_mode", false, false , false, false});
 	commands.push_back({ "toggle_mouse_drag_mode", false, false , false, false});
 	commands.push_back({ "quit", false, false , false, false});
 	commands.push_back({ "open_link", true, false , false, false});
@@ -98,6 +100,10 @@ void print_tree_node(InputParseTreeNode node) {
 	if (node.shift_modifier) {
 		std::wcout << "Shift+";
 	}
+
+	if (node.alt_modifier) {
+		std::wcout << "Alt+";
+	}
 	std::wcout << node.command << std::endl;
 }
 
@@ -123,6 +129,10 @@ InputParseTreeNode parse_token(std::string token) {
 
 		if (subcommands[i] == "S") {
 			res.shift_modifier = true;
+		}
+
+		if (subcommands[i] == "A") {
+			res.alt_modifier = true;
 		}
 	}
 
@@ -318,6 +328,7 @@ InputParseTreeNode* parse_key_config_files(const Path& default_path,
 
 
 InputHandler::InputHandler(const Path& default_path, const std::vector<Path>& user_paths) {
+	user_key_paths = user_paths;
 	reload_config_files(default_path, user_paths);
 }
 
@@ -333,7 +344,7 @@ bool is_digit(int key) {
 	return key >= Qt::Key::Key_0 && key <= Qt::Key::Key_9;
 }
 
-const Command* InputHandler::handle_key(int key, bool shift_pressed, bool control_pressed, int* num_repeats) {
+const Command* InputHandler::handle_key(int key, bool shift_pressed, bool control_pressed, bool alt_pressed, int* num_repeats) {
 	if (key >= 'A' && key <= 'Z') {
 		key = key - 'A' + 'a';
 	}
@@ -345,7 +356,7 @@ const Command* InputHandler::handle_key(int key, bool shift_pressed, bool contro
 
 	for (InputParseTreeNode* child : current_node->children) {
 		//if (child->command == key && child->shift_modifier == shift_pressed && child->control_modifier == control_pressed){
-		if (child->matches(key, shift_pressed, control_pressed)){
+		if (child->matches(key, shift_pressed, control_pressed, alt_pressed)){
 			if (child->is_final == true) {
 				current_node = root;
 				//cout << child->name << endl;
@@ -391,11 +402,27 @@ bool InputParseTreeNode::is_same(const InputParseTreeNode* other) {
 	return (command == other->command) &&
 		(shift_modifier == other->shift_modifier) &&
 		(control_modifier == other->control_modifier) &&
+		(alt_modifier == other->alt_modifier) &&
 		(requires_symbol == other->requires_symbol) &&
 		(requires_text == other->requires_text);
 }
 
-bool InputParseTreeNode::matches(int key, bool shift, bool ctrl)
+bool InputParseTreeNode::matches(int key, bool shift, bool ctrl, bool alt)
 {
-	return (key == this->command) && (shift == this->shift_modifier) && (ctrl == this->control_modifier);
+	return (key == this->command) && (shift == this->shift_modifier) && (ctrl == this->control_modifier) && (alt == this->alt_modifier);
+}
+
+std::optional<Path> InputHandler::get_or_create_user_keys_path() {
+	if (user_key_paths.size() == 0) {
+		return {};
+	}
+
+	for (int i = user_key_paths.size() - 1; i >= 0; i--) {
+		if (user_key_paths[i].file_exists()) {
+			return user_key_paths[i];
+		}
+	}
+	user_key_paths.back().file_parent().create_directories();
+	create_file_if_not_exists(user_key_paths.back().get_path());
+	return user_key_paths.back();
 }
